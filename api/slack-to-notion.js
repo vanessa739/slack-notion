@@ -80,7 +80,7 @@ export default async function handler(req, res) {
                     // Step 2: Upload to Notion
                     const uploadResponse = await notion.fileUploads.create({
                         mode: "single_part",
-                        fileName: `${file.name}.${file.filetype}`,
+                        filename: `${file.name}.${file.filetype}`,
                         content_type: file.mimetype,
                     })
 
