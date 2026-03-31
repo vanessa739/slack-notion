@@ -13,6 +13,17 @@ export default async function handler(req, res) {
     }
 
     const event = req.body.event;
+    console.log('Incoming event:', JSON.stringify({
+        type: event?.type,
+        subtype: event?.subtype,
+        channel: event?.channel,
+        bot_id: event?.bot_id,
+        user: event?.user,
+        ts: event?.ts,
+        hasFiles: !!(event?.files?.length),
+        text: event?.text?.substring(0, 50),
+    }));
+
 
     if (!event || event.bot_id || event.channel !== process.env.SLACK_CHANNEL_ID) {
         return res.status(200).send('Ignored message');
