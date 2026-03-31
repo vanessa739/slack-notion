@@ -15,8 +15,6 @@ export default async function handler(req, res) {
         return res.status(200).send('Ignored message');
     }
 
-    res.status(200).send('Message received');
-
     try {
         const messageText = event.text || "No description provided";
         const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
