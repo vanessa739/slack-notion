@@ -93,9 +93,26 @@ export default async function handler(req, res) {
                     });
                     const uploadResponse = await uploadRecord.json();
                     console.log('Upload record:', JSON.stringify(uploadResponse));
-
+                    
+                    if (!uploadResponse.upload_url) {
+                        console.error('No upload_url in response:', JSON.stringify(uploadResponse));
+                        continue;
+                    }
+                    
+                    // Step 3: PUT the actual file bytes
+                    const putResponse = await fetch(uploadResponse.upload_url, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': file.mimetype },
+                        body: fileBuffer,
+                    });
+                    console.log('PUT status:', putResponse.status, putResponse.statusText);
+                    if (!putResponse.ok) {
+                        console.error('PUT failed:', await putResponse.text());
+                        continue;
+                    }
+                    
                     uploadedFileIds.push(uploadResponse.id);
-                    console.log(`--- File ${file.name} completed, uploadResponse.id: ${uploadResponse.id} ---`);
+                    console.log(`File ${file.name} completed, id: ${uploadResponse.id}`);
                 } catch (fileError) {   
                     console.error(`Error processing file ${file.name}:`, fileError.message, fileError.stack);
                     continue;
