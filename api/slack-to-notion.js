@@ -105,7 +105,7 @@ export default async function handler(req, res) {
 
         const properties = {
             Name: { title: [{ text: { content: title } }] },
-            Date: { date: { start: timestamp } },
+            Created: { date: { start: timestamp } },
             Source: { rich_text: [{ text: { content: "FDE Learning Channel" } }] },
         };
 
