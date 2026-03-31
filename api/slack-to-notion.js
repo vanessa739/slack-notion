@@ -92,6 +92,9 @@ export default async function handler(req, res) {
                                 content_type: file.mimetype,
                             }),
                         });
+                        const responseText = await uploadRecord.text();
+                        console.log('[Step 2] Status:', uploadRecord.status);
+                        console.log('[Step 2] Raw response body:', responseText);
                         const uploadResponse = await uploadRecord.json();
                         console.log('Upload record:', JSON.stringify(uploadResponse));
                     } catch (err) {
