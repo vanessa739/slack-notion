@@ -77,46 +77,20 @@ export default async function handler(req, res) {
                     const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
                     console.log(`[Step 1] Downloaded ${fileBuffer.length} bytes from Slack`);
 
-                    // Step 2: Create Notion upload record (JSON body, not octet-stream)
-                    const uploadPayload = { name: file.name, content_type: file.mimetype };
-                    console.log(`[Step 2] Creating Notion upload record with payload:`, JSON.stringify(uploadPayload));
-                    console.log(`[Step 2] NOTION_API_KEY present: ${!!process.env.NOTION_API_KEY}, length: ${process.env.NOTION_API_KEY?.length}`);
-                    const createResponse = await fetch('https://api.notion.com/v1/file_uploads', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-                            'Content-Type': 'application/json',
-                            'Notion-Version': '2025-09-03',
-                        },
-                        body: JSON.stringify(uploadPayload),
-                    });
-                    console.log(`[Step 2] Notion create response status: ${createResponse.status} ${createResponse.statusText}`);
-                    const uploadRecord = await createResponse.json();
-                    console.log(`[Step 2] Notion upload record:`, JSON.stringify(uploadRecord));
+                    // Step 2: Upload to Notion
+                    const uploadResponse = await notion.fileUploads.create({
+                        mode: "single_part",
+                        fileName: `${file.name}.${file.filetype}`,
+                        content_type: file.mimetype,
+                    })
 
-                    if (!uploadRecord.upload_url) {
-                        console.error('[Step 2] No upload_url in Notion response — full record:', JSON.stringify(uploadRecord));
+                    if (!uploadResponse.status === 'pending') {
+                        console.error('[Step 2] Upload failed:', uploadResponse.status, uploadResponse.statusText);
                         continue;
                     }
 
-                    // Step 3: PUT the actual file bytes
-                    console.log(`[Step 3] PUTting ${fileBuffer.length} bytes to: ${uploadRecord.upload_url.substring(0, 80)}...`);
-                    const putResponse = await fetch(uploadRecord.upload_url, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': file.mimetype },
-                        body: fileBuffer,
-                    });
-                    console.log(`[Step 3] PUT response status: ${putResponse.status} ${putResponse.statusText}`);
-                    if (!putResponse.ok) {
-                        const putErrorBody = await putResponse.text();
-                        console.error(`[Step 3] PUT FAILED: ${putResponse.status} ${putResponse.statusText}`);
-                        console.error(`[Step 3] PUT error body:`, putErrorBody);
-                        continue;
-                    }
-                    console.log(`[Step 3] PUT succeeded for file: ${file.name}`);
-
-                    uploadedFileIds.push(uploadRecord.id);
-                    console.log(`--- File ${file.name} completed, uploadRecord.id: ${uploadRecord.id} ---`);
+                    uploadedFileIds.push(uploadResponse.id);
+                    console.log(`--- File ${file.name} completed, uploadResponse.id: ${uploadResponse.id} ---`);
                 } catch (fileError) {
                     console.error(`Error processing file ${file.name}:`, fileError.message, fileError.stack);
                     continue;
