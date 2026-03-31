@@ -4,6 +4,9 @@ const notion = new Client({
     auth: process.env.NOTION_API_KEY
 });
 
+// Simple in-memory dedup to ignore Slack retries
+const processedEvents = new Set();
+
 export default async function handler(req, res) {
     if (req.body.type === 'url_verification') {
         return res.status(200).json({ challenge: req.body.challenge });
@@ -15,6 +18,19 @@ export default async function handler(req, res) {
         return res.status(200).send('Ignored message');
     }
 
+    // Dedup: Slack retries use the same event.ts + channel combo
+    const eventKey = `${event.channel}-${event.ts}`;
+    if (processedEvents.has(eventKey)) {
+        return res.status(200).send('Duplicate, skipping');
+    }
+    processedEvents.add(eventKey);
+
+    // Prevent unbounded memory growth (keep last 100)
+    if (processedEvents.size > 100) {
+        const first = processedEvents.values().next().value;
+        processedEvents.delete(first);
+    }
+
     try {
         const messageText = event.text || "No description provided";
         const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
@@ -24,6 +40,7 @@ export default async function handler(req, res) {
         if (event.files && event.files.length > 0) {
             for (const file of event.files) {
                 try {
+                    // Step 1: Download from Slack
                     const slackResponse = await fetch(file.url_private, {
                         headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
                     });
@@ -33,14 +50,16 @@ export default async function handler(req, res) {
                     }
                     const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
 
-                    const createResponse = await fetch(`https://api.notion.com/v1/file_uploads`, {
+                    // Step 2: Create Notion upload record (JSON body, not octet-stream)
+                    const createResponse = await fetch('https://api.notion.com/v1/file_uploads', {
                         method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-                            'Content-Type': 'application/octet-stream',
+                            'Content-Type': 'application/json',
+                            'Notion-Version': '2025-09-03',
                         },
                         body: JSON.stringify({ name: file.name, content_type: file.mimetype }),
-                    }).then(res => res.json());
+                    });
                     const uploadRecord = await createResponse.json();
 
                     if (!uploadRecord.upload_url) {
@@ -48,9 +67,10 @@ export default async function handler(req, res) {
                         continue;
                     }
 
+                    // Step 3: PUT the actual file bytes
                     const putResponse = await fetch(uploadRecord.upload_url, {
                         method: 'PUT',
-                        headers: { "Content-Type": file.mimetype },
+                        headers: { 'Content-Type': file.mimetype },
                         body: fileBuffer,
                     });
 
@@ -59,7 +79,7 @@ export default async function handler(req, res) {
                         continue;
                     }
 
-                    uploadedFileIds.push(uploadRecord.file_id);
+                    uploadedFileIds.push(uploadRecord.id);
                 } catch (fileError) {
                     console.error(`Error processing file ${file.name}: ${fileError.message}`);
                     continue;
@@ -67,29 +87,41 @@ export default async function handler(req, res) {
             }
         }
 
-        const urlRegex = /https?:\/\/[^\s]+/g;
+        const urlRegex = /https?:\/\/[^\s>]+/g;
         const extractedUrls = messageText.match(urlRegex) || [];
+
         const properties = {
-            Name: { title: [{ text: { content: title }}]},
-            Date: { date: { start: timestamp }},
-            Source: { rich_text: [{ text: { content: "FDE Learning Channel"}}]},
-        }
+            Name: { title: [{ text: { content: title } }] },
+            Date: { date: { start: timestamp } },
+            Source: { rich_text: [{ text: { content: "FDE Learning Channel" } }] },
+        };
+
         if (extractedUrls.length > 0) {
-            properties.Links = { rich_text: extractedUrls.map((url, index) => ({ text: { content: index > 0 ? `\n${url}` : url, link: { url: url }}}))};
+            properties.Links = {
+                rich_text: extractedUrls.map((url, index) => ({
+                    text: { content: index > 0 ? `\n${url}` : url, link: { url } },
+                })),
+            };
         }
+
         if (uploadedFileIds.length > 0) {
-            properties.Files = { files: uploadedFileIds.map(id => ({ type: "file_upload", file_upload: { id }}))};
+            properties.Files = {
+                files: uploadedFileIds.map(id => ({
+                    type: "file_upload",
+                    file_upload: { id },
+                })),
+            };
         }
 
         await notion.pages.create({
-            parent: { data_source_id: process.env.NOTION_DATABASE_ID},
-            properties
-        })
+            parent: { data_source_id: process.env.NOTION_DATABASE_ID },
+            properties,
+        });
 
         console.log(`Successfully sent message to Notion: ${title}`);
         return res.status(200).send('Message sent to Notion');
     } catch (error) {
         console.error('Error sending message to Notion:', error);
-        return res.status(500).send('Error sending message to Notion');
+        return res.status(200).send('Error but ack');
     }
 }
