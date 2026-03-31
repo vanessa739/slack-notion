@@ -78,19 +78,20 @@ export default async function handler(req, res) {
                     console.log(`[Step 1] Downloaded ${fileBuffer.length} bytes from Slack`);
 
                     // Step 2: Upload to Notion
-                    const uploadResponse = await notion.fileUploads.create({
-                        mode: "single_part",
-                        filename: `${file.name}.${file.filetype}`,
-                        content_type: file.mimetype,
-                    })
-
-                    if (!uploadResponse.status === 'pending') {
-                        console.error('[Step 2] Upload failed:', uploadResponse.status, uploadResponse.statusText);
-                        continue;
+                    try {
+                        const uploadRecord = await notion.fileUploads.create({
+                            mode: "single_part",
+                            filename: `${file.name}.${file.filetype}`,
+                            content_type: file.mimetype,
+                        });
+                        console.log('Upload record:', JSON.stringify(uploadRecord));
+                    } catch (err) {
+                        console.error('Notion SDK error:', JSON.stringify(err.body ?? err.message));
+                        console.error('Full error:', err);
                     }
 
-                    uploadedFileIds.push(uploadResponse.id);
-                    console.log(`--- File ${file.name} completed, uploadResponse.id: ${uploadResponse.id} ---`);
+                    uploadedFileIds.push(uploadRecord.id);
+                    console.log(`--- File ${file.name} completed, uploadRecord.id: ${uploadRecord.id} ---`);
                 } catch (fileError) {
                     console.error(`Error processing file ${file.name}:`, fileError.message, fileError.stack);
                     continue;
