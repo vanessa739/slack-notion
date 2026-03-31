@@ -102,7 +102,11 @@ export default async function handler(req, res) {
                     // Step 3: PUT the actual file bytes
                     const putResponse = await fetch(uploadResponse.upload_url, {
                         method: 'PUT',
-                        headers: { 'Content-Type': file.mimetype },
+                        headers: {
+                            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+                            'Content-Type': file.mimetype,
+                            'Notion-Version': '2022-06-28',
+                        },
                         body: fileBuffer,
                     });
                     console.log('PUT status:', putResponse.status, putResponse.statusText);
