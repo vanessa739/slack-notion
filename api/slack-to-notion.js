@@ -23,6 +23,7 @@ export default async function handler(req, res) {
         hasFiles: !!(event?.files?.length),
         text: event?.text?.substring(0, 50),
     }));
+    console.log('Slack channel ID:', process.env.SLACK_CHANNEL_ID);
 
 
     if (!event || event.bot_id || event.channel !== process.env.SLACK_CHANNEL_ID) {
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
 
         const uploadedFileIds = [];
         if (event.files && event.files.length > 0) {
+            console.log('Uploading files:', event.files.length);
             for (const file of event.files) {
                 try {
                     // Step 1: Download from Slack
@@ -124,6 +126,7 @@ export default async function handler(req, res) {
             };
         }
 
+        console.log('Creating Notion page with properties:', properties);
         await notion.pages.create({
             parent: { data_source_id: process.env.NOTION_DATABASE_ID },
             properties,
