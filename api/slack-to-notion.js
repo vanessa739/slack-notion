@@ -9,37 +9,86 @@ export default async function handler(req, res) {
         return res.status(200).json({ challenge: req.body.challenge });
     }
 
-    res.status(200).send('Hello, world!');
+    const event = req.body.event;
 
     if (!event || event.bot_id || event.channel !== process.env.SLACK_CHANNEL_ID) {
-        return;
+        return res.status(200).send('Ignored message');
     }
+
+    res.status(200).send('Message received');
 
     try {
         const messageText = event.text || "No description provided";
-        const timestamp = new Date(event.ts * 1000).toISOString();
+        const timestamp = new Date(parseFloat(event.ts) * 1000).toISOString();
+        const title = messageText.substring(0, 100) || (event.files?.[0]?.name ?? "Untitled");
 
-        let resourceUrls = [];
+        const uploadedFileIds = [];
         if (event.files && event.files.length > 0) {
-            resourceUrls = event.files.map(file => file.permalink);
-        } else {
-            const urlRegex = /https?:\/\/[^\s]+/;
-            const urls = messageText.match(urlRegex);
-            if (urls && urls.length > 0) {
-                resourceUrls = urls;
+            for (const file of event.files) {
+                try {
+                    const slackResponse = await fetch(file.url_private, {
+                        headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
+                    });
+                    if (!slackResponse.ok) {
+                        console.error(`Slack download failed for ${file.name}: ${slackResponse.statusText}`);
+                        continue;
+                    }
+                    const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
+
+                    const createResponse = await fetch(`https://api.notion.com/v1/file_uploads`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+                            'Content-Type': 'application/octet-stream',
+                        },
+                        body: JSON.stringify({ name: file.name, content_type: file.mimetype }),
+                    }).then(res => res.json());
+                    const uploadRecord = await createResponse.json();
+
+                    if (!uploadRecord.upload_url) {
+                        console.error('No upload URL found in Notion response:', uploadRecord);
+                        continue;
+                    }
+
+                    const putResponse = await fetch(uploadRecord.upload_url, {
+                        method: 'PUT',
+                        headers: { "Content-Type": file.mimetype },
+                        body: fileBuffer,
+                    });
+
+                    if (!putResponse.ok) {
+                        console.error(`Failed to upload file to Notion: ${putResponse.statusText}`);
+                        continue;
+                    }
+
+                    uploadedFileIds.push(uploadRecord.file_id);
+                } catch (fileError) {
+                    console.error(`Error processing file ${file.name}: ${fileError.message}`);
+                    continue;
+                }
             }
+        }
+
+        const urlRegex = /https?:\/\/[^\s]+/g;
+        const extractedUrls = messageText.match(urlRegex) || [];
+        const properties = {
+            Name: { title: [{ text: { content: title }}]},
+            Date: { date: { start: timestamp }},
+            Source: { rich_text: [{ text: { content: "FDE Learning Channel"}}]},
+        }
+        if (extractedUrls.length > 0) {
+            properties.Links = { rich_text: extractedUrls.map((url, index) => ({ text: { content: index > 0 ? `\n${url}` : url, link: { url: url }}}))};
+        }
+        if (uploadedFileIds.length > 0) {
+            properties.Files = { files: uploadedFileIds.map(id => ({ type: "file_upload", file_upload: { id }}))};
         }
 
         await notion.pages.create({
             parent: { data_source_id: process.env.NOTION_DATABASE_ID},
-            properties: {
-                Name: { title: [{ text: { content: messageText.substring(0, 100)}}]},
-                Date: { date: { start: timestamp }},
-                Links: { rich_text: resourceUrls.map(url => ({ text: { content: url }}))},
-                Source: { rich_text: [{ text: { content: "FDE Learning Channel"}}]},
-            }
+            properties
         })
 
+        console.log(`Successfully sent message to Notion: ${title}`);
         return res.status(200).send('Message sent to Notion');
     } catch (error) {
         console.error('Error sending message to Notion:', error);
