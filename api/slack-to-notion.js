@@ -77,30 +77,22 @@ export default async function handler(req, res) {
                     const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
                     console.log(`[Step 1] Downloaded ${fileBuffer.length} bytes from Slack`);
 
-                    // Step 2: Upload to Notion
-                    try {
-                        const uploadRecord = await fetch('https://api.notion.com/v1/file_uploads', {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-                                'Content-Type': 'application/json',
-                                'Notion-Version': '2022-06-28',
-                            },
-                            body: JSON.stringify({
-                                mode: "single_part",
-                                filename: file.name,
-                                content_type: file.mimetype,
-                            }),
-                        });
-                        const responseText = await uploadRecord.text();
-                        console.log('[Step 2] Status:', uploadRecord.status);
-                        console.log('[Step 2] Raw response body:', responseText);
-                        const uploadResponse = await uploadRecord.json();
-                        console.log('Upload record:', JSON.stringify(uploadResponse));
-                    } catch (err) {
-                        console.error('Notion SDK error:', JSON.stringify(err.body ?? err.message));
-                        console.error('Full error:', err);
-                    }
+
+                    const uploadRecord = await fetch('https://api.notion.com/v1/file_uploads', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Notion-Version': '2022-06-28',
+                        },
+                        body: JSON.stringify({
+                            mode: "single_part",
+                            filename: file.name,
+                            content_type: file.mimetype,
+                        }),
+                    });
+                    const uploadResponse = await uploadRecord.json();
+                    console.log('Upload record:', JSON.stringify(uploadResponse));
 
                     uploadedFileIds.push(uploadResponse.id);
                     console.log(`--- File ${file.name} completed, uploadResponse.id: ${uploadResponse.id} ---`);
