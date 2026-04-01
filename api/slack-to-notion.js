@@ -105,7 +105,7 @@ export default async function handler(req, res) {
 
                     console.log(`[Step 3] Sending ${fileBuffer.length} bytes to upload_url as FormData`);
                     const putResponse = await fetch(uploadResponse.upload_url, {
-                        method: 'PUT',
+                        method: 'POST',
                         headers: {
                             'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
                             'Notion-Version': '2022-06-28',
