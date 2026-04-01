@@ -26,7 +26,7 @@ async function findNotionPageByThreadId(threadTs) {
             headers: {
                 'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
                 'Content-Type': 'application/json',
-                'Notion-Version': '2022-06-28',
+                'Notion-Version': '2026-03-11',
             },
             body: JSON.stringify({
                 filter: {
@@ -71,7 +71,7 @@ async function uploadFilesToNotion(files) {
                 headers: {
                     'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
                     'Content-Type': 'application/json',
-                    'Notion-Version': '2022-06-28',
+                    'Notion-Version': '2026-03-11',
                 },
                 body: JSON.stringify({
                     mode: "single_part",
@@ -94,7 +94,7 @@ async function uploadFilesToNotion(files) {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-                    'Notion-Version': '2022-06-28',
+                    'Notion-Version': '2026-03-11',
                 },
                 body: formData,
             });
