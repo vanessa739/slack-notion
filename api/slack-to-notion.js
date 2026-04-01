@@ -33,8 +33,10 @@ async function findNotionPageByThreadId(threadTs) {
                 rich_text: { equals: threadTs },
             },
         }),
-    }).then(response => response.json());
-    return response.data_source_id || null;
+    });
+    const data = await response.json();
+    console.log('Notion page query response:', JSON.stringify(data));
+    return data.results?.[0] || null;
 }
 
 async function uploadFilesToNotion(files) {
