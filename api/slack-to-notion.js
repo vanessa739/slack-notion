@@ -19,7 +19,8 @@ async function getThreadMessages(channel, threadTs) {
 }
 
 async function findNotionPageByThreadId(threadTs) {
-    const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}`, {
+    const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}/query`, {
+        method: 'POST',
         headers: {
             'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
             'Content-Type': 'application/json',
