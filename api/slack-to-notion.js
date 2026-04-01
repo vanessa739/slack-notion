@@ -99,15 +99,18 @@ export default async function handler(req, res) {
                         continue;
                     }
                     
-                    // Step 3: PUT the actual file bytes
+                    // Step 3: Send file bytes as multipart form data
+                    const formData = new FormData();
+                    formData.append('file', new Blob([fileBuffer], { type: file.mimetype }), file.name);
+
+                    console.log(`[Step 3] Sending ${fileBuffer.length} bytes to upload_url as FormData`);
                     const putResponse = await fetch(uploadResponse.upload_url, {
                         method: 'PUT',
                         headers: {
                             'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-                            'Content-Type': file.mimetype,
                             'Notion-Version': '2022-06-28',
                         },
-                        body: fileBuffer,
+                        body: formData,
                     });
                     console.log('PUT status:', putResponse.status, putResponse.statusText);
                     if (!putResponse.ok) {
