@@ -141,6 +141,18 @@ export default async function handler(req, res) {
         return res.status(200).send('Main message, skipping');
     }
 
+    // Skip bot subscription notifications (causes duplicate pages)
+    if (/^subscribed\s+<@[A-Z0-9]+>\s+to the thread$/i.test((event.text || '').trim())) {
+        console.log('Bot subscription message, skipping');
+        return res.status(200).send('Subscription message, skipping');
+    }
+
+    // Skip thread-closed notifications
+    if (/:\s*white_check_mark\s*:\s*Closed by/i.test(event.text || '')) {
+        console.log('Thread-closed message, skipping');
+        return res.status(200).send('Thread closed, skipping');
+    }
+
     // Dedup
     const eventKey = `${event.channel}-${event.ts}`;
     if (processedEvents.has(eventKey)) {
@@ -195,8 +207,13 @@ export default async function handler(req, res) {
 
         const parentMessage = threadMessages[0];
         const title = (parentMessage?.text || "Untitled").substring(0, 100);
-        const description = event.text || "No description provided";
         const timestamp = new Date(parseFloat(threadTs) * 1000).toISOString();
+
+        let description = event.text || "No description provided";
+        if (description.startsWith(title)) {
+            description = description.slice(title.length).replace(/^[\s\-:]+/, '').trim();
+        }
+        if (!description) description = "No description provided";
 
         // Upload all files from entire thread
         const allFiles = [];
