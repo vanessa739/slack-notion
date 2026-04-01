@@ -19,24 +19,31 @@ async function getThreadMessages(channel, threadTs) {
 }
 
 async function findNotionPageByThreadId(threadTs) {
-    const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}/query`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
-            'Content-Type': 'application/json',
-            'Notion-Version': '2022-06-28',
-        },
-        body: JSON.stringify({
-            data_source_id: process.env.NOTION_DATABASE_ID,
-            filter: {
-                property: 'ThreadID',
-                rich_text: { equals: threadTs },
+    try {
+        console.log('Querying for ThreadID:', threadTs);
+        const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}/query`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+                'Content-Type': 'application/json',
+                'Notion-Version': '2022-06-28',
             },
-        }),
-    });
-    const data = await response.json();
-    console.log('Notion page query response:', JSON.stringify(data));
-    return data.results?.[0] || null;
+            body: JSON.stringify({
+                filter: {
+                    property: 'ThreadID',
+                    rich_text: { equals: threadTs },
+                },
+            }),
+        });
+        console.log('Query response status:', response.status);
+        const text = await response.text();
+        console.log('Query response body:', text);
+        const data = JSON.parse(text);
+        return data.results?.[0] || null;
+    } catch (err) {
+        console.error('findNotionPageByThreadId error:', err.message, err.stack);
+        return null;
+    }
 }
 
 async function uploadFilesToNotion(files) {
