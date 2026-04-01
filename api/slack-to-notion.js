@@ -114,6 +114,18 @@ async function uploadFilesToNotion(files) {
     return uploadedFileIds;
 }
 
+async function getSlackUserName(userId) {
+    const response = await fetch(`https://slack.com/api/users.info?user=${userId}`, {
+        headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
+    });
+    const data = await response.json();
+    if (!data.ok) {
+        console.error('Failed to fetch user:', data.error);
+        return userId; // fallback to raw ID
+    }
+    return data.user?.real_name || data.user?.name || userId;
+}
+
 export default async function handler(req, res) {
     if (req.body.type === 'url_verification') {
         return res.status(200).json({ challenge: req.body.challenge });
@@ -208,6 +220,7 @@ export default async function handler(req, res) {
         const parentMessage = threadMessages[0];
         const title = (parentMessage?.text || "Untitled").substring(0, 100);
         const timestamp = new Date(parseFloat(threadTs) * 1000).toISOString();
+        const author = await getSlackUserName(parentMessage?.user);
 
         let description = event.text || "No description provided";
         if (description.startsWith(title)) {
@@ -231,6 +244,7 @@ export default async function handler(req, res) {
 
         const properties = {
             Name: { title: [{ text: { content: title } }] },
+            Author: { rich_text: [{ text: { content: author } }] },
             Created: { date: { start: timestamp } },
             Source: { rich_text: [{ text: { content: "FDE Learning Channel" } }] },
             Description: { rich_text: [{ text: { content: description.substring(0, 2000) } }] },
