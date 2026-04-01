@@ -18,24 +18,22 @@ async function getThreadMessages(channel, threadTs) {
     return data.messages || [];
 }
 
-async function getAllThreadFiles(channel, threadTs) {
-    const messages = await getThreadMessages(channel, threadTs);
-    const allFiles = [];
-    for (const msg of messages) {
-        if (msg.files) allFiles.push(...msg.files);
-    }
-    return allFiles;
-}
-
 async function findNotionPageByThreadId(threadTs) {
-    const response = await notion.databases.query({
-        database_id: process.env.NOTION_DATABASE_ID,
-        filter: {
-            property: 'ThreadID',
-            rich_text: { equals: threadTs },
+    const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}`, {
+        headers: {
+            'Authorization': `Bearer ${process.env.NOTION_API_KEY}`,
+            'Content-Type': 'application/json',
+            'Notion-Version': '2022-06-28',
         },
-    });
-    return response.results?.[0] || null;
+        body: JSON.stringify({
+            data_source_id: process.env.NOTION_DATABASE_ID,
+            filter: {
+                property: 'ThreadID',
+                rich_text: { equals: threadTs },
+            },
+        }),
+    }).then(response => response.json());
+    return response.data_source_id || null;
 }
 
 async function uploadFilesToNotion(files) {
@@ -123,7 +121,7 @@ export default async function handler(req, res) {
         text: event?.text?.substring(0, 50),
     }));
 
-    if (!event || event.bot_id || event.channel !== process.env.SLACK_CHANNEL_ID) {
+    if (!event || event.channel !== process.env.SLACK_CHANNEL_ID) {
         return res.status(200).send('Ignored');
     }
 
@@ -231,7 +229,7 @@ export default async function handler(req, res) {
 
         console.log('Creating Notion page:', JSON.stringify(properties, null, 2));
         await notion.pages.create({
-            parent: { database_id: process.env.NOTION_DATABASE_ID },
+            parent: { data_source_id: process.env.NOTION_DATABASE_ID },
             properties,
         });
 
