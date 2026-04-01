@@ -221,6 +221,7 @@ export default async function handler(req, res) {
         const title = (parentMessage?.text || "Untitled").substring(0, 100);
         const timestamp = new Date(parseFloat(threadTs) * 1000).toISOString();
         const author = await getSlackUserName(event?.user);
+        console.log('Parent message full: ', JSON.stringify(parentMessage, null, 2));
 
         let description = event.text || "No description provided";
         if (description.startsWith(title)) {
