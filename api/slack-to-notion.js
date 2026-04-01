@@ -6,31 +6,36 @@ const notion = new Client({
 
 const processedEvents = new Set();
 
-// Fetch the parent message text from a thread
-async function getParentMessage(channel, threadTs) {
-    const response = await fetch(`https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}&limit=1`, {
-        headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
-    });
-    const data = await response.json();
-    if (!data.ok) {
-        console.error('Failed to fetch parent message:', data.error);
-        return null;
-    }
-    return data.messages?.[0]; // First message in a thread is always the parent
-}
-
-// Check how many replies a thread has
-async function getThreadReplyCount(channel, threadTs) {
+async function getThreadMessages(channel, threadTs) {
     const response = await fetch(`https://slack.com/api/conversations.replies?channel=${channel}&ts=${threadTs}`, {
         headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
     });
     const data = await response.json();
     if (!data.ok) {
-        console.error('Failed to fetch thread replies:', data.error);
-        return -1;
+        console.error('Failed to fetch thread:', data.error);
+        return [];
     }
-    // First message is the parent, rest are replies
-    return (data.messages?.length || 1) - 1;
+    return data.messages || [];
+}
+
+async function getAllThreadFiles(channel, threadTs) {
+    const messages = await getThreadMessages(channel, threadTs);
+    const allFiles = [];
+    for (const msg of messages) {
+        if (msg.files) allFiles.push(...msg.files);
+    }
+    return allFiles;
+}
+
+async function findNotionPageByThreadId(threadTs) {
+    const response = await notion.databases.query({
+        database_id: process.env.NOTION_DATABASE_ID,
+        filter: {
+            property: 'ThreadID',
+            rich_text: { equals: threadTs },
+        },
+    });
+    return response.results?.[0] || null;
 }
 
 async function uploadFilesToNotion(files) {
@@ -38,21 +43,19 @@ async function uploadFilesToNotion(files) {
     if (!files || files.length === 0) return uploadedFileIds;
 
     console.log('=== FILE UPLOAD START ===');
-    console.log('Number of files:', files.length);
-
     for (const file of files) {
-        console.log(`--- Processing file: ${file.name} (${file.mimetype}, ${file.size} bytes) ---`);
+        console.log(`--- Processing: ${file.name} (${file.mimetype}, ${file.size} bytes) ---`);
         try {
             // Step 1: Download from Slack
             const slackResponse = await fetch(file.url_private, {
                 headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` }
             });
             if (!slackResponse.ok) {
-                console.error(`Slack download FAILED for ${file.name}: ${slackResponse.status}`);
+                console.error(`Slack download FAILED: ${slackResponse.status}`);
                 continue;
             }
             const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
-            console.log(`Downloaded ${fileBuffer.length} bytes from Slack`);
+            console.log(`Downloaded ${fileBuffer.length} bytes`);
 
             // Step 2: Create Notion upload record
             const uploadRecord = await fetch('https://api.notion.com/v1/file_uploads', {
@@ -69,10 +72,9 @@ async function uploadFilesToNotion(files) {
                 }),
             });
             const uploadResponse = await uploadRecord.json();
-            console.log('Upload record:', JSON.stringify(uploadResponse));
 
             if (!uploadResponse.upload_url) {
-                console.error('No upload_url in response:', JSON.stringify(uploadResponse));
+                console.error('No upload_url:', JSON.stringify(uploadResponse));
                 continue;
             }
 
@@ -88,20 +90,19 @@ async function uploadFilesToNotion(files) {
                 },
                 body: formData,
             });
-            console.log('Upload status:', putResponse.status, putResponse.statusText);
             if (!putResponse.ok) {
                 console.error('Upload failed:', await putResponse.text());
                 continue;
             }
 
             uploadedFileIds.push(uploadResponse.id);
-            console.log(`File ${file.name} completed, id: ${uploadResponse.id}`);
-        } catch (fileError) {
-            console.error(`Error processing file ${file.name}:`, fileError.message);
+            console.log(`File ${file.name} uploaded, id: ${uploadResponse.id}`);
+        } catch (err) {
+            console.error(`Error processing ${file.name}:`, err.message);
             continue;
         }
     }
-    console.log('=== FILE UPLOAD END === uploadedFileIds:', JSON.stringify(uploadedFileIds));
+    console.log('=== FILE UPLOAD END === ids:', JSON.stringify(uploadedFileIds));
     return uploadedFileIds;
 }
 
@@ -122,24 +123,14 @@ export default async function handler(req, res) {
         text: event?.text?.substring(0, 50),
     }));
 
-    // Ignore bots, wrong channel
     if (!event || event.bot_id || event.channel !== process.env.SLACK_CHANNEL_ID) {
         return res.status(200).send('Ignored');
     }
 
-    // Ignore main messages (no thread_ts, or thread_ts === ts)
+    // Ignore main messages — wait for replies
     if (!event.thread_ts || event.thread_ts === event.ts) {
-        console.log('Main message, skipping — waiting for first reply');
+        console.log('Main message, skipping');
         return res.status(200).send('Main message, skipping');
-    }
-
-    // It's a thread reply — check if it's the first one
-    const replyCount = await getThreadReplyCount(event.channel, event.thread_ts);
-    console.log(`Thread ${event.thread_ts} has ${replyCount} replies`);
-
-    if (replyCount > 1) {
-        console.log('Not the first reply, skipping');
-        return res.status(200).send('Not first reply, skipping');
     }
 
     // Dedup
@@ -154,20 +145,59 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Fetch parent message for the title
-        const parentMessage = await getParentMessage(event.channel, event.thread_ts);
+        const threadTs = event.thread_ts;
+        const existingPage = await findNotionPageByThreadId(threadTs);
+
+        if (existingPage) {
+            // --- UPDATE PATH: Page exists, append new files ---
+            console.log(`Found existing Notion page for thread ${threadTs}: ${existingPage.id}`);
+
+            if (event.files && event.files.length > 0) {
+                const newFileIds = await uploadFilesToNotion(event.files);
+
+                if (newFileIds.length > 0) {
+                    // Get existing file IDs from the page
+                    const existingFiles = existingPage.properties.Files?.files || [];
+                    const allFileEntries = [
+                        ...existingFiles,
+                        ...newFileIds.map(id => ({
+                            type: "file_upload",
+                            file_upload: { id },
+                        })),
+                    ];
+
+                    await notion.pages.update({
+                        page_id: existingPage.id,
+                        properties: {
+                            Files: { files: allFileEntries },
+                        },
+                    });
+                    console.log(`Updated Notion page with ${newFileIds.length} new files`);
+                }
+            } else {
+                console.log('No files in this reply, nothing to update');
+            }
+
+            return res.status(200).send('Updated existing page');
+        }
+
+        // --- CREATE PATH: First reply, create new page ---
+        const threadMessages = await getThreadMessages(event.channel, threadTs);
+        console.log('Thread messages count:', threadMessages.length);
+
+        const parentMessage = threadMessages[0];
         const title = (parentMessage?.text || "Untitled").substring(0, 100);
         const description = event.text || "No description provided";
-        const timestamp = new Date(parseFloat(event.thread_ts) * 1000).toISOString();
+        const timestamp = new Date(parseFloat(threadTs) * 1000).toISOString();
 
-        // Collect files from both parent and first reply
-        const allFiles = [
-            ...(parentMessage?.files || []),
-            ...(event.files || []),
-        ];
+        // Upload all files from entire thread
+        const allFiles = [];
+        for (const msg of threadMessages) {
+            if (msg.files) allFiles.push(...msg.files);
+        }
         const uploadedFileIds = await uploadFilesToNotion(allFiles);
 
-        // Collect URLs from both messages
+        // Collect URLs from parent + first reply
         const urlRegex = /https?:\/\/[^\s>]+/g;
         const allUrls = [
             ...(parentMessage?.text?.match(urlRegex) || []),
@@ -179,6 +209,7 @@ export default async function handler(req, res) {
             Created: { date: { start: timestamp } },
             Source: { rich_text: [{ text: { content: "FDE Learning Channel" } }] },
             Description: { rich_text: [{ text: { content: description.substring(0, 2000) } }] },
+            ThreadID: { rich_text: [{ text: { content: threadTs } }] },
         };
 
         if (allUrls.length > 0) {
@@ -198,13 +229,13 @@ export default async function handler(req, res) {
             };
         }
 
-        console.log('Creating Notion page with properties:', JSON.stringify(properties, null, 2));
+        console.log('Creating Notion page:', JSON.stringify(properties, null, 2));
         await notion.pages.create({
-            parent: { data_source_id: process.env.NOTION_DATABASE_ID },
+            parent: { database_id: process.env.NOTION_DATABASE_ID },
             properties,
         });
 
-        console.log(`Successfully created Notion page: ${title}`);
+        console.log(`Created Notion page: ${title}`);
         return res.status(200).send('Created Notion page');
     } catch (error) {
         console.error('Error:', error.message, error.body ?? '', error.stack);
