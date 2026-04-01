@@ -20,7 +20,6 @@ async function getThreadMessages(channel, threadTs) {
 
 async function findNotionPageByThreadId(threadTs) {
     try {
-        console.log('Querying for ThreadID:', threadTs);
         const response = await fetch(`https://api.notion.com/v1/data_sources/${process.env.NOTION_DATABASE_ID}/query`, {
             method: 'POST',
             headers: {
@@ -35,9 +34,7 @@ async function findNotionPageByThreadId(threadTs) {
                 },
             }),
         });
-        console.log('Query response status:', response.status);
         const text = await response.text();
-        console.log('Query response body:', text);
         const data = JSON.parse(text);
         return data.results?.[0] || null;
     } catch (err) {
@@ -50,9 +47,7 @@ async function uploadFilesToNotion(files) {
     const uploadedFileIds = [];
     if (!files || files.length === 0) return uploadedFileIds;
 
-    console.log('=== FILE UPLOAD START ===');
     for (const file of files) {
-        console.log(`--- Processing: ${file.name} (${file.mimetype}, ${file.size} bytes) ---`);
         try {
             // Step 1: Download from Slack
             const slackResponse = await fetch(file.url_private, {
@@ -63,7 +58,6 @@ async function uploadFilesToNotion(files) {
                 continue;
             }
             const fileBuffer = Buffer.from(await slackResponse.arrayBuffer());
-            console.log(`Downloaded ${fileBuffer.length} bytes`);
 
             // Step 2: Create Notion upload record
             const uploadRecord = await fetch('https://api.notion.com/v1/file_uploads', {
@@ -104,13 +98,11 @@ async function uploadFilesToNotion(files) {
             }
 
             uploadedFileIds.push(uploadResponse.id);
-            console.log(`File ${file.name} uploaded, id: ${uploadResponse.id}`);
         } catch (err) {
             console.error(`Error processing ${file.name}:`, err.message);
             continue;
         }
     }
-    console.log('=== FILE UPLOAD END === ids:', JSON.stringify(uploadedFileIds));
     return uploadedFileIds;
 }
 
@@ -181,14 +173,12 @@ export default async function handler(req, res) {
         const existingPage = await findNotionPageByThreadId(threadTs);
 
         if (existingPage) {
-            // --- UPDATE PATH: Page exists, append new files ---
             console.log(`Found existing Notion page for thread ${threadTs}: ${existingPage.id}`);
 
             if (event.files && event.files.length > 0) {
                 const newFileIds = await uploadFilesToNotion(event.files);
 
                 if (newFileIds.length > 0) {
-                    // Get existing file IDs from the page
                     const existingFiles = existingPage.properties.Files?.files || [];
                     const allFileEntries = [
                         ...existingFiles,
@@ -204,7 +194,6 @@ export default async function handler(req, res) {
                             Files: { files: allFileEntries },
                         },
                     });
-                    console.log(`Updated Notion page with ${newFileIds.length} new files`);
                 }
             } else {
                 console.log('No files in this reply, nothing to update');
@@ -215,12 +204,12 @@ export default async function handler(req, res) {
 
         // --- CREATE PATH: First reply, create new page ---
         const threadMessages = await getThreadMessages(event.channel, threadTs);
-        console.log('Thread messages count:', threadMessages.length);
 
         const parentMessage = threadMessages[0];
         const title = (parentMessage?.text || "Untitled").substring(0, 100);
         const timestamp = new Date(parseFloat(threadTs) * 1000).toISOString();
         const author = await getSlackUserName(event?.user);
+        console.log('Parent message full: ', JSON.stringify(parentMessage));
 
         let description = event.text || "No description provided";
         if (description.startsWith(title)) {
